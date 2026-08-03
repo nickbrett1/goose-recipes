@@ -1,0 +1,82 @@
+version: "1.0.0"
+title: "Scaffold Project (genproj)"
+description: "Follow the implementation plan's Phase 1 to scaffold the project repository via the fintechnick genproj MCP, copy the design documents into it, push, and PAUSE for the user to clone the new repo before implementation continues."
+extensions:
+  - name: fintechnick
+    type: stdio
+    cmd: sh
+    args:
+      - -c
+      - 'npx -y mcp-remote https://www.fintechnick.com/api/mcp --header "Authorization: Bearer $FINTECHNICK_MCP"'
+    env_keys:
+      - FINTECHNICK_MCP
+    description: "fintechnick MCP providing the genproj project generation tool"
+  - name: developer
+    type: builtin
+    bundled: true
+    description: "Write and edit files, and execute shell commands"
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "Directory containing the design documents and plan.md (output of generate-plan)"
+  - key: project_name
+    input_type: string
+    requirement: required
+    description: "Name of the new repository/project (kebab-case, e.g. toddler-stripe)"
+  - key: repository_url
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Optional pre-created GitHub repository URL. If omitted, genproj creates the repository"
+  - key: capabilities
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Comma-separated genproj capability ids (e.g. coding-agents,devcontainer-rust,circleci). If omitted, derive from plan.md Phase 1"
+prompt: |
+  Scaffold the repository for **{{ project_name }}** using the implementation plan at **{{ project_root }}/plan.md**, copy the design documents into it, and pause for the user to clone it.
+  {% if repository_url %}Target repository: {{ repository_url }}{% endif %}
+  {% if capabilities %}Requested genproj capabilities: {{ capabilities }}{% endif %}
+instructions: |
+  You are executing Phase 1 (Repository Bootstrap) of an implementation plan. The plan is at {{ project_root }}/plan.md and the validated design documents are at {{ project_root }}.
+
+  ## Step 0 — Verify inputs (fail fast)
+  Confirm `{{ project_root }}/plan.md` exists and is non-empty. If it is missing, STOP and tell the user to run the `generate-plan` recipe first.
+
+  ## Step 1 — Read the plan's Phase 1
+  Read `{{ project_root }}/plan.md` in full, with particular attention to Phase 1 (Repository Bootstrap). Extract:
+  - The genproj capabilities the plan specifies.
+  - Any repository naming, URL, or configuration details.
+  - Any ordering constraints (e.g. "scaffold via genproj before any manual project setup").
+
+  ## Step 2 — Determine the capability set
+  - If the `capabilities` parameter was provided (non-empty), use it (comma-separated).
+  - Else if plan.md Phase 1 names capabilities, use those exactly.
+  - Else ask the user which capabilities they want.
+  Before calling generate, call the `fintechnick` MCP `list_genproj_capabilities` and verify every id you intend to use exists in the catalog. If a planned capability is missing from the catalog, flag it to the user rather than silently dropping it.
+
+  ## Step 3 — Generate the repository
+  Call the `fintechnick` MCP `generate_project` tool with:
+  - `name`: {{ project_name }}
+  - `selectedCapabilities`: the verified capability ids
+  - `repositoryUrl`: the target repository, if one was provided
+  Resolve any conflicts the tool reports (use the `resolutions` parameter, confirming with the user when ambiguous).
+
+  ## Step 4 — Copy the design documents into the new repo
+  Once genproj reports the repository is created:
+  1. Clone the new repository locally (shell: `git clone`). If you are already inside the generated repo working tree, skip cloning.
+  2. Create a `specs/` folder in the repo and copy the design documents into it:
+     - `description.md`
+     - the full `spec/` tree (including `dependency-map.yaml`)
+     - `_generated/` (the specdag report and assembled map)
+     - `plan.md`
+     - `generate-plan-prompt.md` if it exists
+  3. Commit with a message like "Add validated design documents and implementation plan" and push to the repository's default branch.
+
+  ## Step 5 — PAUSE for the user (do NOT continue)
+  STOP here. This is the handoff point:
+  1. Report the repository URL and what was scaffolded (capabilities used, files copied).
+  2. Ask the user to **clone the repo** (if they haven't) and open it in their development environment (e.g. VS Code devcontainer).
+  3. Tell them the next step: launch a new goose session **inside the generated project** and run the `execute-plan` recipe to continue the implementation.
+  4. Wait for explicit confirmation from the user that the repo is cloned and ready before doing anything else. Do not start implementing plan phases.

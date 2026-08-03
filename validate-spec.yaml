@@ -1,0 +1,70 @@
+version: "1.0.0"
+title: "Validate Spec (specdag + Traceability Audit)"
+description: "Validate design documents: author the ESDD dependency-map.yaml, run an LLM traceability audit against description.md, then execute specdag checks (validate, doctor, assemble, render, report). Loops until clean."
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "Directory containing description.md and the spec/ tree (output of design-project)"
+prompt: |
+  Validate the design documents at **{{ project_root }}** using the specdag workflow and a traceability audit.
+instructions: |
+  You are validating a project's design documents before an implementation plan is written. The goal is a **validated spec** that is accurate and complete: every documented goal traces to a spec node, every expectation has a verifier, and all specdag checks pass.
+
+  Work in {{ project_root }}.
+
+  ## Step 0 — Verify inputs (fail fast)
+  Confirm all of the following exist and are non-empty. If any are missing, STOP and tell the user to run the `design-project` recipe first:
+  - `description.md`
+  - `spec/` tree with the project's artifacts (topology/, api/, data-architecture/, flows/, ui/, capacity/ as applicable)
+  - `spec/event-flow.md`
+  - `spec/implementation-considerations.md`
+
+  ## Step 1 — Author spec/dependency-map.yaml
+  Create (or update) `spec/dependency-map.yaml`: an ESDD (Event-Spec-Driven Development) directed acyclic graph with these node types:
+  - **intent** — a business/user goal (one per goal in description.md).
+  - **expectation** — a testable success criterion for an intent.
+  - **job** — an implementation component (e.g. "Rust Cloudflare Worker Backend").
+  - **artifact** — a design document, with a `ref:` pointing at its actual file under `spec/` (e.g. `topology/component-graph.mmd`).
+  - **contract** — an API schema (e.g. the OpenAPI yaml).
+  - **verifier** — a verification routine/check that proves an expectation.
+
+  Edge semantics (strict directions):
+  - `intent -> expectation` with type `defines_success_for`
+  - `verifier -> expectation` with type `verifies`
+  - `artifact/contract/job -> verifier` with type `verified_by`
+  - `job -> artifact/contract` with type `consumes`
+
+  Every artifact you list must reference a file that actually exists under `spec/`. Use the yaml-language-server schema comment and keep node ids namespaced (e.g. `intent.scan-item`, `verifier.d1-schema`).
+
+  ## Step 2 — LLM traceability audit
+  Read `description.md` in full and audit the DAG:
+  1. Every stated goal/requirement in description.md maps to an **intent** node — no goal may be missing (e.g. a "view analytics" requirement missing its `intent.view-analytics` node is a gap).
+  2. Every intent has at least one expectation; every expectation is verified by at least one verifier.
+  3. Check scope boundaries: if description.md declares something out-of-scope, the DAG must not claim a job for it — but in-scope service/API components that support it MUST still be present (mirror the toddler-stripe case: analytics frontend out-of-scope, analytics backend APIs in-scope).
+  4. Every artifact/contract referenced in the DAG exists on disk; every spec file that matters to the design is represented.
+  Write the audit findings (goal → intent → expectation → verifier trace table, plus any gaps found) to `_generated/traceability.md`.
+
+  ## Step 3 — Run specdag (use the shell tool; specdag is a CLI, not an MCP)
+  Run each of these and require exit code 0:
+  ```bash
+  specdag validate spec/dependency-map.yaml --strict
+  specdag doctor .
+  specdag assemble . -o _generated/assembled-map.json
+  specdag render spec/dependency-map.yaml > spec/dependency-map.mmd
+  specdag report spec/dependency-map.yaml -o _generated/report.html
+  ```
+  If `specdag` is not installed or not on PATH, STOP and ask the user to install it.
+
+  ## Step 4 — Reconcile loop
+  For every failure or gap found in Steps 2–3:
+  1. Fix the root cause — update `description.md` (e.g. add the missing scope disclaimer), the affected `spec/` files, and/or `spec/dependency-map.yaml`. Do not silence a check by weakening the DAG.
+  2. Re-run Step 3 (and the affected part of Step 2) until everything passes.
+  Explain each fix to the user as you go.
+
+  ## Completion criteria
+  - All five specdag commands exit 0.
+  - `_generated/report.html` and `_generated/assembled-map.json` exist.
+  - `_generated/traceability.md` documents the trace table with no unresolved gaps.
+  - The user confirms the spec is now accurate and complete.
+  Summarize what validation caught and what was reconciled. **Do NOT start implementation or write a plan.**

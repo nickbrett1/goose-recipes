@@ -1,0 +1,86 @@
+version: "1.0.0"
+title: "Generate Implementation Plan"
+description: "Generate a comprehensive, step-by-step implementation plan (plan.md) from validated design documents. Phases tagged [MANUAL]/[AGENT], tools named per step, consumable by humans and AI agents."
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "Directory containing the validated design documents (output of validate-spec)"
+prompt: |
+  Generate a comprehensive implementation plan for the project at **{{ project_root }}** and write it to `{{ project_root }}/plan.md`.
+instructions: |
+  You are generating an implementation plan for a project whose design documents have already been validated. The plan must be consumable by **both a human developer and an AI agent workflow**:
+  - Every step must be unambiguous and self-contained — no hand-waving or "set up X as appropriate".
+  - Steps requiring human intervention are flagged **[MANUAL]**; agent-autonomous steps are flagged **[AGENT]**; steps needing both are flagged **[MANUAL + AGENT]**.
+  - Where a specific tool or MCP should be used, name it explicitly.
+  - Success criteria for each phase must be stated clearly.
+
+  Work in {{ project_root }}.
+
+  ## Step 0 — Verify inputs (fail fast)
+  Confirm these all exist and are non-empty; if any are missing, STOP and tell the user to run `validate-spec` (and `design-project` before it) first:
+  - `description.md`
+  - `spec/dependency-map.yaml`
+  - `spec/event-flow.md`
+  - `spec/implementation-considerations.md` — **read this with particular care**; the plan must not contradict or ignore anything captured here.
+  - The rest of the `spec/` tree (topology/, api/, data-architecture/, flows/, ui/, capacity/ as applicable).
+
+  ## Step 1 — Read every input file in full
+  Ground the plan in all of the following (adapt names to what actually exists):
+  - `description.md` — goals, scope, out-of-scope.
+  - `spec/dependency-map.yaml` — the plan's phases should map to the `job.*` nodes and success criteria should reference the `expectation.*` nodes.
+  - `spec/event-flow.md` — event schemas.
+  - `spec/implementation-considerations.md` — every constraint, ordering dependency, tooling decision, and risk. The plan must enforce ALL of them.
+  - `spec/topology/**`, `spec/data-architecture/**`, `spec/api/**`, `spec/flows/**`, `spec/ui/**` (including wireframes), `spec/capacity/**`.
+
+  ## Step 2 — Enforce key constraints from implementation-considerations.md
+  Re-state the most critical constraints as plan rules (mirror the toddler-stripe examples):
+  1. Scaffold-before-manual-setup ordering (e.g. "genproj scaffold first, Xcode project second").
+  2. Deployment paths are CI-only where the considerations say so (e.g. no manual deploys).
+  3. Platform-specific build/test feedback loops (e.g. iOS via the xcode-native MCP, only when the Mac host is available).
+  4. Local datastores must be seeded separately from production where applicable.
+  5. Any licensing/account constraints (e.g. no paid developer program required).
+  6. Secrets: only create the secrets the considerations say are missing; reuse existing projects/tokens where specified.
+  7. Payment/hardware handled by the approved SDKs/readers, not native alternatives, where the considerations say so.
+  8. Design system rules (if a `design-system.md` exists) are mandatory for all UI code — reference the document as a constraint rather than restating all rules.
+
+  ## Step 3 — Tooling table
+  Embed this tooling table in the plan (trim rows not applicable to the project) and name a tool for each step:
+  | Tool | What it does |
+  | --- | --- |
+  | `fintechnick` MCP → `generate_project` | Scaffold the starter repo with genproj capabilities |
+  | `fintechnick` MCP → `list_genproj_capabilities` | Inspect available capabilities before scaffolding |
+  | `specdag` CLI | Re-validate the spec when it changes |
+  | `xcode-native` MCP → `BuildProject` / `GetBuildLog` / `RunAllTests` / `XcodeWrite` / `XcodeUpdate` / `RenderPreview` | iOS build/test/feedback loop (Mac host, Xcode open) |
+  | `run_command` (devcontainer terminal) | Cargo/npm builds, wrangler dev, doppler CLI, git |
+  | `write_to_file` / `view_file` | Create and read non-Xcode files (Rust, config, migrations) |
+  | `github` MCP | Repository operations |
+  | `doppler` MCP | Secrets and project config |
+  | `circleci` MCP | CI/CD pipeline inspection and triggers |
+
+  ## Step 4 — Required structure of plan.md
+  Use this phase structure (expand each phase into concrete, numbered, executable tasks — never leave a phase as a high-level summary):
+  ```
+  Phase 0: Prerequisites
+  Phase 1: Repository Bootstrap        # genproj scaffold + copy design docs + manual clone step
+  Phase 2: Backend                     # backend service per the spec
+  Phase 3: Client / UI                 # client(s) per the spec
+  Phase 4: Integration                 # wire components together, seed data, end-to-end
+  Phase 5: Validation                  # hardware/manual validation, production checks
+  ```
+  **Phase 1 MUST include:**
+  - Selecting the genproj capabilities explicitly (e.g. `coding-agents`, `devcontainer-<lang>`, `circleci`, `doppler`, `cloudflare-wrangler`, `dependabot`, `editor-tools`, `gitguardian` — whatever the project needs).
+  - Scaffolding via the `fintechnick` MCP `generate_project`.
+  - Copying the design documents into the new repo under `specs/` (description.md, spec/ tree, dependency-map.yaml, _generated/, plan.md).
+  - A **[MANUAL]** step: the user clones the generated repo and opens it (e.g. VS Code devcontainer) before implementation continues.
+
+  For each step include:
+  - The **action** to take.
+  - The **tool or mechanism** to use.
+  - Whether it is **[MANUAL]**, **[AGENT]**, or **[MANUAL + AGENT]**.
+  - The **success condition** — how to know the step is complete.
+  - Any **dependencies** on previous steps.
+  Where a step involves writing code, specify: which file(s) to create/modify, what the code must implement (referencing the relevant spec/schema/OpenAPI endpoint), and what test or verification confirms correctness.
+
+  ## Step 5 — Output
+  Write the completed plan to `{{ project_root }}/plan.md`. It should be thorough enough that a developer with no prior context on the project, or a fresh AI agent session with repository access, could execute it from start to finish without asking clarifying questions. Where genuine ambiguity remains, document it explicitly as an open decision within the plan rather than guessing.

@@ -8,6 +8,8 @@ The process is modeled on the [stripe-toddler](https://github.com/nickbrett1/str
 proposal → design docs → specdag validation → implementation plan → genproj scaffold → execute
 ```
 
+---
+
 ## The five recipes
 
 | # | Recipe | Input → Output |
@@ -20,7 +22,32 @@ proposal → design docs → specdag validation → implementation plan → genp
 
 Run them in order. Each recipe validates that its inputs exist and stops with a clear message if a previous step is missing.
 
+## The contract (shared paths)
+
+All recipes agree on one layout. `{{ project_root }}` is the parameter you pass when running a recipe.
+
+```
+<project_root>/
+├── description.md                # proposal / business case (recipe 1)
+├── spec/
+│   ├── topology/                 # component-graph.mmd, deployment-targets.md
+│   ├── api/                      # <service>-openapi.yaml, <client>-protocols.md
+│   ├── data-architecture/        # <store>-schema.sql, kv-layout.json, domain-models.<lang>
+│   ├── flows/                    # <flow>-sequence.md, <flow>-state-machine.md
+│   ├── ui/                       # design-system.md, wireframes/*.excalidraw
+│   ├── capacity/                 # load-model.md
+│   ├── event-flow.md             # event schemas
+│   ├── implementation-considerations.md   # constraint ledger (read carefully by recipe 3)
+│   └── dependency-map.yaml       # ESDD/SpecDAG graph (recipe 2)
+├── _generated/                   # specdag output: assembled-map.json, report.html (recipe 2)
+└── plan.md                       # implementation plan (recipe 3)
+```
+
+When recipe 4 copies the design docs into the generated repo, they land in `<repo>/specs/`.
+
 ## Installation
+
+Recipes are global. Two options:
 
 **Option A — GitHub repo (recommended).** Point goose at this repo directly:
 
@@ -36,25 +63,29 @@ Requires the GitHub CLI (`gh`) installed and authenticated.
 git clone https://github.com/nickbrett1/goose-recipes.git ~/.config/goose/recipes/
 ```
 
+(Alternatively add the repo path via `GOOSE_RECIPE_PATH`.)
+
 Verify discovery with `goose recipe list`.
 
 ## Usage
 
-1. **Design** — `/recipe design-project` (provide `project_name`, `project_root`; optionally `proposal_file` and `conventions_file`)
+Run the recipes in order from a goose session in the workspace where you want the design artifacts to live:
+
+1. **Design** — `/recipe design-project` (provide `project_name`, `project_root`; optionally a `proposal_file` and a `conventions_file`)
 2. **Validate** — `/recipe validate-spec` (provide `project_root`)
 3. **Plan** — `/recipe generate-plan` (provide `project_root`)
-4. **Scaffold** — `/recipe scaffold-project` (provide `project_root`, `project_name`, optional `repository_url`/`capabilities`) — **pauses** for you to clone the generated repo
+4. **Scaffold** — `/recipe scaffold-project` (provide `project_root`, `project_name`, optional `repository_url`/`capabilities`) — this recipe **pauses** for you to clone the generated repo
 5. **Execute** — launch a new goose session inside the cloned project (its devcontainer), then `/recipe execute-plan`
 
 ## Prerequisites
 
-- goose CLI
-- `fintechnick` MCP extension enabled (used by `scaffold-project` for genproj) with `FINTECHNICK_MCP` env var
-- `specdag` CLI on `PATH` (used by `validate-spec`)
-- GitHub credentials for genproj repo creation and cloning
+- **goose CLI** (recipes run in the CLI or Desktop)
+- **`fintechnick` MCP extension** enabled (used by `scaffold-project` for genproj). Requires the `FINTECHNICK_MCP` environment variable.
+- **`specdag` CLI** installed and on `PATH` (used by `validate-spec`)
+- A GitHub account + credentials for genproj repo creation and cloning
 
 ## Conventions
 
-Default development conventions: [`conventions/development-conventions.md`](conventions/development-conventions.md) (derived from the ftn constitution). Override per project by passing a `conventions_file` to `design-project`.
+The default development conventions are in [`conventions/development-conventions.md`](conventions/development-conventions.md) (derived from the ftn project constitution): mandatory tests with >80% coverage, strict lint/format, secrets via Doppler when any exist, CircleCI pipelines, WCAG 2.1 AA for UI surfaces, Lighthouse ≥90 when configured, and ADRs for deviations.
 
-See the full contract (shared paths) in the README history / repo docs.
+**Overriding:** pass a `conventions_file` parameter to `design-project` to bind a different conventions document for that project (e.g. `conventions/development-conventions.md` from this repo, or a project-specific fork). Recipe 1 will treat the provided file as binding; deviations are documented in ADRs.

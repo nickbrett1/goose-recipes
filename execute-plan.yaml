@@ -1,0 +1,50 @@
+version: "1.0.0"
+title: "Execute Implementation Plan"
+description: "Execute plan.md phase-by-phase from inside the generated project. [AGENT] steps are run autonomously, [MANUAL] steps pause for the user, with a checkpoint between phases. Run this recipe from a goose session inside the cloned project."
+parameters:
+  - key: plan_path
+    input_type: string
+    requirement: optional
+    default: "specs/plan.md"
+    description: "Path to plan.md relative to the current working directory (the generated project root)"
+  - key: start_phase
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Phase to start from, e.g. 'Phase 2'. Defaults to the first phase not yet completed"
+  - key: end_phase
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Phase to stop after, e.g. 'Phase 4'. Defaults to the last phase"
+prompt: |
+  Execute the implementation plan at **{{ plan_path }}**.
+  {% if start_phase %}Start at {{ start_phase }}.{% endif %}
+  {% if end_phase %}Stop after {{ end_phase }}.{% endif %}
+instructions: |
+  You are executing an implementation plan for the project in the current working directory. The plan is consumable by both humans and AI agents: steps are tagged **[MANUAL]**, **[AGENT]**, or **[MANUAL + AGENT]**, name the tool to use, and define success criteria. Work with the plan, not around it.
+
+  ## Step 0 — Read the plan
+  Read `{{ plan_path }}` in full. Present the phase map to the user:
+  - Which phases exist, which are already complete, and which you will execute now (honoring `start_phase` / `end_phase` if provided).
+  - If the plan references files (specs, schemas, OpenAPI), read them as needed while executing.
+
+  ## Step 1 — Execute each step, respecting its tag
+  - **[AGENT]** — execute autonomously: do the action, run the named tool, verify the success condition.
+  - **[MANUAL]** — do NOT attempt it. Explain exactly what the user must do (with any commands), then pause and wait for them to confirm completion before continuing.
+  - **[MANUAL + AGENT]** — coordinate: do your part, then pause for the user's part, then verify the combined success condition.
+  - Use the tools the plan names (shell for builds/tests/git/wrangler/doppler, write/edit for files, `github`/`doppler`/`circleci` MCPs, `fintechnick` genproj where needed, and `xcode-native` MCP for iOS steps — note that xcode-native is only available when the Mac host has Xcode open with the project loaded; if the connection is unavailable, treat it as a [MANUAL] step).
+
+  ## Step 2 — Checkpoint between phases
+  At the end of each phase:
+  1. Summarize what was completed and whether every success criterion for the phase was met.
+  2. List any failed or deferred steps and the reason.
+  3. Get the user's explicit go-ahead before starting the next phase. If a phase's success criteria failed, do not proceed — work with the user to fix it first.
+
+  ## Step 3 — Track progress
+  Keep the user informed of progress. If the plan is not itself marked up, maintain a lightweight progress record (e.g. `plan-progress.md` next to the plan) noting which steps are done, in progress, or blocked — update it as you go so a fresh session can resume.
+
+  ## Step 4 — Completion
+  When the final phase (or `end_phase`) is reached and its success criteria are met:
+  - Summarize the overall state: what is implemented, what remains manual/outstanding, and any open decisions.
+  - Do not silently skip steps to "finish" — an explicit, agreed deferral with a reason is fine; a forgotten step is not.
