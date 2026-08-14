@@ -1,0 +1,165 @@
+version: "1.0.0"
+title: "Add NAS Container"
+description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volume1/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, and verify memory/health."
+parameters:
+  - key: container_name
+    input_type: string
+    requirement: required
+    description: "Kebab-case name for the container/service (e.g. nas-port-mcp)"
+  - key: image
+    input_type: string
+    requirement: required
+    description: "Full image reference (e.g. ghcr.io/nickbrett1/nas-port-mcp:latest)"
+  - key: is_own_container
+    input_type: boolean
+    requirement: optional
+    default: "false"
+    description: "true if this is your own image (ghcr.io/nickbrett1/*) — routes it to watchtower-nick (scope=nick, 60s poll)"
+  - key: description
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "One-line description of what the container does (used in the homepage entry)"
+  - key: ports
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Port mapping(s), e.g. '8080:80' or '127.0.0.1:3002:3000' (loopback for local-only tools). Leave empty for network_mode: host or no published ports"
+  - key: network_mode
+    input_type: select
+    requirement: optional
+    description: "Docker network mode. host is only for tools that must see the host network namespace (like nas-port-mcp)"
+    default: "bridge"
+    options:
+      - bridge
+      - host
+  - key: mem_limit
+    input_type: string
+    requirement: optional
+    default: "512m"
+    description: "Memory limit (mem_limit + memswap_limit, set equal). 512m baseline for small utilities; 1g-2g for apps with databases/heavy runtimes; parquet-peek needed 2048m"
+  - key: volumes
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Volume mounts, one per line, e.g. '/volume1/marketdata/backup/parquet:/data:ro'"
+  - key: environment
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Extra environment variables (TZ=US/Eastern is added automatically), one per line 'KEY=value'"
+  - key: homepage_group
+    input_type: select
+    requirement: required
+    description: "Which group in /volume1/docker/homepage/config/services.yaml to add the service under"
+    options:
+      - "Servers & Devices"
+      - "Media Stack"
+      - "Data & Markets"
+      - "AI & LLMs"
+      - "Network & Security"
+      - "System & Monitoring"
+      - "Utilities & Search"
+      - "Tasks & Productivity"
+  - key: icon
+    input_type: string
+    requirement: optional
+    default: "mdi-docker"
+    description: "Homepage icon: an mdi-* name (e.g. mdi-table-large), an http(s) icon URL (e.g. selfhst/icons png), or a png filename already in the homepage icons dir"
+  - key: health_endpoint
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "HTTP health path for the homepage siteMonitor, e.g. '/health'. Appended to http://127.0.0.1:<port>"
+  - key: widget
+    input_type: string
+    requirement: optional
+    default: ""
+    description: "Optional homepage widget config (the lines under 'widget:', minus indentation), e.g. 'type: <type>' plus 'url: http://127.0.0.1:<port>' and 'key: <key>' where the widget needs one"
+prompt: |
+  Add a new container to the NAS: **{{ container_name }}** (image `{{ image }}`).
+  {% if is_own_container == "true" %}This is my own image — route it to watchtower-nick (scope=nick).{% else %}Third-party image — plain watchtower (nightly 03:00).{% endif %}
+  {% if description %}What it does: {{ description }}{% endif %}
+  {% if ports %}Ports: {{ ports }}{% endif %}
+  {% if mem_limit %}Memory limit: {{ mem_limit }}{% endif %}
+  {% if volumes %}Volumes:
+  {{ volumes }}{% endif %}
+  {% if environment %}Environment:
+  {{ environment }}{% endif %}
+  Homepage group: {{ homepage_group }}.
+  {% if health_endpoint %}Health endpoint: {{ health_endpoint }}{% endif %}
+instructions: |
+  You are adding a new container to the NAS. Follow the established conventions of the existing stacks (/volume1/docker/mealie, vikunja, nas-port-mcp, parquet-peek, ...) — read one or two of those compose files first so the new file matches the house style exactly.
+
+  ## Step 0 — Confirm details
+  Before writing anything, confirm with the user (or use the provided parameters):
+  - Container name, image, and what it does.
+  - Ports: published mapping `host:container`, loopback `127.0.0.1:host:container` for local-only tools, or `network_mode: host` when the tool must see the host network namespace (like nas-port-mcp).
+  - Volumes and environment variables.
+  - Image provenance: own image (ghcr.io/nickbrett1/*), third-party registry image, or a locally built image with no registry push (like vikunja-mcp).
+
+  ## Step 1 — Create the compose file
+  Create `/volume1/docker/{{ container_name }}/compose.yaml` with this skeleton (match the existing files' formatting):
+
+  ```yaml
+  services:
+    {{ container_name }}:
+      image: {{ image }}
+      container_name: {{ container_name }}
+      restart: unless-stopped
+      mem_limit: {{ mem_limit }}
+      memswap_limit: {{ mem_limit }}
+      {% if network_mode == "host" %}network_mode: host
+      {% elif ports %}ports:
+        - "{{ ports }}"
+      {% endif %}environment:
+        - TZ=US/Eastern
+      volumes:
+      labels:
+        {% if is_own_container == "true" %}- "com.centurylinklabs.watchtower.enable=true"
+        - "com.centurylinklabs.watchtower.scope=nick"{% else %}- "com.centurylinklabs.watchtower.enable=true"{% endif %}
+  ```
+
+  Then fill in the `volumes:` and `environment:` lists from the parameters (each entry as a `- "KEY=value"` or `- "src:dst"` line at the same indentation as `- TZ=US/Eastern`). If `network_mode` is bridge and no ports were given, omit the `ports:` key entirely.
+
+  Memory limits are **mandatory** — always set `mem_limit` and `memswap_limit` to the same value:
+  - 512m baseline for small utilities/MCP servers.
+  - 1g–2g for apps with databases or heavy runtimes.
+  - parquet-peek lesson: a 512m cgroup was OOM-killed because DuckDB in-process never sees the cgroup limit and never spills; it needed 2048m. If the app does heavy in-process compute, prefer 2g and verify with docker stats.
+  - Locally built image with no registry (so watchtower cannot update it): use `com.centurylinklabs.watchtower.enable=false` instead and note the manual rebuild command in a comment (see vikunja-mcp).
+
+  Validate the file before deploying:
+  `sudo docker compose -f /volume1/docker/{{ container_name }}/compose.yaml config --quiet`
+
+  ## Step 2 — Deploy
+  `cd /volume1/docker/{{ container_name }} && sudo docker compose up -d`
+  Confirm it is running: `sudo docker ps --filter name={{ container_name }}`
+  If a health endpoint was given, check it: `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:<port>{{ health_endpoint }}`
+
+  ## Step 3 — Verify memory (the parquet-peek lesson)
+  Run `sudo docker stats --no-stream {{ container_name }}` and compare MemUsage to the limit. If the container is near/over the limit, has a rising RestartCount, or repeatedly exits with code 137 (OOM), raise `mem_limit` in the compose file and `sudo docker compose up -d` again. Check for crash-looping with `sudo docker inspect {{ container_name }}` (look at the RestartCount field).
+
+  ## Step 4 — Confirm watchtower routing (the labels did the work)
+  Confirm the labels landed: `sudo docker inspect {{ container_name }}` and grep the Labels for `centurylinklabs`.
+  - Own image → scope=nick label → **watchtower-nick** (60s poll) picks it up on its next cycle, no restart needed; a new GHCR publish is pulled within ~15 min.
+  - Third-party → no scope label → **watchtower** (nightly 03:00) covers it.
+  - Locally built → enable=false → neither updates it; note the manual rebuild command.
+
+  ## Step 5 — Add to homepage (gethomepage)
+  Edit `/volume1/docker/homepage/config/services.yaml` and add the service under the **{{ homepage_group }}** group, matching the existing YAML style:
+
+  ```yaml
+      - {{ container_name }}:
+          icon: {{ icon }}
+          href: http://nas:<port>/
+          {% if description %}description: {{ description }}
+          {% endif %}server: local
+          container: {{ container_name }}
+          {% if health_endpoint %}siteMonitor: http://127.0.0.1:<port>{{ health_endpoint }}
+          {% endif %}
+  ```
+
+  Use `icon` from the parameters (an mdi-* name, an icon URL, or a png in /volume1/docker/homepage/config/icons/). If a `widget` was provided, add it after `container:` with each line indented two spaces deeper than the service keys (see the plex/miniflux entries for the shape). Homepage auto-reloads config on change; if the tile has not appeared within ~30 seconds, restart it: `sudo docker restart homepage`.
+
+  ## Step 6 — Finish and summarize
+  Report: compose file path, deploy status, memory limit + observed usage, watchtower routing (which instance + poll interval), and the homepage entry. Flag anything left for the user (widget API keys, DNS/Tailscale exposure for external access, first-run setup, etc.). Update the session todo list with any follow-ups.

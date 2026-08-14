@@ -10,7 +10,7 @@ proposal → design docs → specdag validation → implementation plan → genp
 
 ---
 
-## The five recipes
+## The recipes
 
 | # | Recipe | Input → Output |
 |---|--------|----------------|
@@ -20,7 +20,15 @@ proposal → design docs → specdag validation → implementation plan → genp
 | 4 | [`scaffold-project.yaml`](scaffold-project.yaml) | `plan.md` → genproj creates the repo, design docs copied in, **pauses for you to clone** |
 | 5 | [`execute-plan.yaml`](execute-plan.yaml) | `plan.md` → executes the plan phase-by-phase from inside the generated project |
 
-Run them in order. Each recipe validates that its inputs exist and stops with a clear message if a previous step is missing.
+Recipes 1–5 are the spec-first chain: run them in order. Each recipe validates that its inputs exist and stops with a clear message if a previous step is missing.
+
+### NAS operations
+
+| # | Recipe | Input → Output |
+|---|--------|----------------|
+| 6 | [`add-nas-container.yaml`](add-nas-container.yaml) | New container name/image/params → `/volume1/docker/<name>/compose.yaml` (sensible mem limits + correct watchtower labels), gethomepage entry, deployed & memory-verified |
+
+NAS-specific (not part of the spec-first chain). Run from a goose session on the NAS; it models the nas-port-mcp / parquet-peek additions: composes the stack with `mem_limit`/`memswap_limit` caps, routes your own `ghcr.io/nickbrett1/*` images to watchtower-nick (`scope=nick`, 60s poll) via labels and third-party images to the plain nightly watchtower, then adds the tile to `/volume1/docker/homepage/config/services.yaml` and verifies memory/health post-deploy.
 
 ## The contract (shared paths)
 
@@ -76,6 +84,8 @@ Run the recipes in order from a goose session in the workspace where you want th
 3. **Plan** — `/recipe generate-plan` (provide `project_root`)
 4. **Scaffold** — `/recipe scaffold-project` (provide `project_root`, `project_name`, optional `repository_url`/`capabilities`) — this recipe **pauses** for you to clone the generated repo
 5. **Execute** — launch a new goose session inside the cloned project (its devcontainer), then `/recipe execute-plan`
+
+For NAS container ops (Synology `/volume1/docker` stacks): `/recipe add-nas-container` (provide `container_name`, `image`, `homepage_group`; optionally `is_own_container`, `ports`, `mem_limit`, `volumes`, `environment`, `icon`, `health_endpoint`, `widget`).
 
 ## Prerequisites
 
