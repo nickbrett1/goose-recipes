@@ -88,6 +88,7 @@ prompt: |
   {{ environment }}{% endif %}
   Homepage group: {{ homepage_group }}.
   {% if health_endpoint %}Health endpoint: {{ health_endpoint }}{% endif %}
+  {% if widget %}Widget: {{ widget }}{% endif %}
 instructions: |
   You are adding a new container to the NAS. Follow the established conventions of the existing stacks (/volume1/docker/mealie, vikunja, nas-port-mcp, parquet-peek, ...) — read one or two of those compose files first so the new file matches the house style exactly.
 
@@ -159,7 +160,13 @@ instructions: |
           {% endif %}
   ```
 
-  Use `icon` from the parameters (an mdi-* name, an icon URL, or a png in /volume1/docker/homepage/config/icons/). If a `widget` was provided, add it after `container:` with each line indented two spaces deeper than the service keys (see the plex/miniflux entries for the shape). Homepage auto-reloads config on change; if the tile has not appeared within ~30 seconds, restart it: `sudo docker restart homepage`.
+  Use `icon` from the parameters (an mdi-* name, an icon URL, or a png in /volume1/docker/homepage/config/icons/).
+  {% if widget %}If a `widget` was provided, add it after `container:` with each line indented two spaces deeper than the service keys (see the plex/miniflux entries for the shape). The widget lines are:
+
+  {{ widget }}
+
+  Indent each line to sit under the `widget:` key (two spaces deeper than the service keys).{% endif %}
+  Homepage auto-reloads config on change; if the tile has not appeared within ~30 seconds, restart it: `sudo docker restart homepage`.
 
   ## Step 6 — Finish and summarize
   Report: compose file path, deploy status, memory limit + observed usage, watchtower routing (which instance + poll interval), and the homepage entry. Flag anything left for the user (widget API keys, DNS/Tailscale exposure for external access, first-run setup, etc.). Update the session todo list with any follow-ups.
