@@ -107,7 +107,7 @@ instructions: |
     {{ container_name }}:
       image: {{ image }}
       container_name: {{ container_name }}
-      restart: unless-stopped
+      restart: always
       mem_limit: {{ mem_limit }}
       memswap_limit: {{ mem_limit }}
       {% if network_mode == "host" %}network_mode: host
@@ -120,6 +120,8 @@ instructions: |
         {% if is_own_container == "true" %}- "com.centurylinklabs.watchtower.enable=true"
         - "com.centurylinklabs.watchtower.scope=nick"{% else %}- "com.centurylinklabs.watchtower.enable=true"{% endif %}
   ```
+
+  Note: the `restart: always` policy is intentional — it ensures the container comes back up automatically whenever the NAS reboots (Synology restarts the Docker daemon on boot, and `always` restarts the container unconditionally, unlike `unless-stopped` which respects a prior manual stop). Keep it as-is for every container.
 
   Then fill in the `volumes:` and `environment:` lists from the parameters (each entry as a `- "KEY=value"` or `- "src:dst"` line at the same indentation as `- TZ=US/Eastern`). If `network_mode` is bridge and no ports were given, omit the `ports:` key entirely.
 
