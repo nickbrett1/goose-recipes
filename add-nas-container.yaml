@@ -1,15 +1,35 @@
 version: "1.0.0"
 title: "Add NAS Container"
-description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volume1/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, and verify memory/health."
+description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volume1/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, and verify memory/health. For MCP tool servers, also join the ai_proxy network and auto-register them behind the Traefik reverse proxy so they get an externally-reachable URL (e.g. http://100.82.223.13:8092/<name>/mcp)."
 parameters:
   - key: container_name
     input_type: string
     requirement: required
-    description: "Kebab-case name for the container/service (e.g. nas-port-mcp)"
+    description: "Kebab-case name for the container/service (e.g. nas-port-mcp, catalog-mcp)"
   - key: image
     input_type: string
     requirement: required
     description: "Full image reference (e.g. ghcr.io/nickbrett1/nas-port-mcp:latest)"
+  - key: is_mcp
+    input_type: boolean
+    requirement: optional
+    default: "false"
+    description: "true if this is an MCP/OpenAPI tool server that Open WebUI and other tools should reach through the Traefik reverse proxy. Joins the ai_proxy network and adds the traefik.* labels."
+  - key: mcp_port
+    input_type: string
+    requirement: optional
+    default: "8000"
+    description: "The in-container port the MCP/OpenAPI server listens on (used by the Traefik label). Only relevant when is_mcp=true."
+  - key: mcp_path
+    input_type: string
+    requirement: optional
+    default: "/mcp"
+    description: "The path the MCP server serves on mcp_port (e.g. /mcp, /api/mcp, /openapi.json). Used for the external URL and homepage link. Only relevant when is_mcp=true."
+  - key: proxy_url
+    input_type: string
+    requirement: optional
+    default: "http://100.82.223.13:8092"
+    description: "Base URL of the Traefik reverse proxy (entry point). The MCP service is reachable at <proxy_url>/<container_name>/<mcp_path>. Only relevant when is_mcp=true."
   - key: is_own_container
     input_type: boolean
     requirement: optional
@@ -24,11 +44,11 @@ parameters:
     input_type: string
     requirement: optional
     default: ""
-    description: "Port mapping(s), e.g. '8080:80' or '127.0.0.1:3002:3000' (loopback for local-only tools). Leave empty for network_mode: host or no published ports"
+    description: "Port mapping(s), e.g. '8080:80' or '127.0.0.1:3002:3000' (loopback for local-only tools). Leave empty for network_mode: host or no published ports. For MCP servers behind the proxy this is OPTIONAL — Traefik routes internally, so a host publish is only needed for direct access."
   - key: network_mode
     input_type: select
     requirement: optional
-    description: "Docker network mode. host is only for tools that must see the host network namespace (like nas-port-mcp)"
+    description: "Docker network mode. host is only for tools that must see the host network namespace (like nas-port-mcp). Ignored when is_mcp=true (MCP servers join ai_proxy instead)."
     default: "bridge"
     options:
       - bridge
@@ -37,7 +57,7 @@ parameters:
     input_type: string
     requirement: optional
     default: "512m"
-    description: "Memory limit (mem_limit + memswap_limit, set equal). 512m baseline for small utilities; 1g-2g for apps with databases/heavy runtimes; parquet-peek needed 2048m"
+    description: "Memory limit (mem_limit + memswap_limit, set equal). 512m baseline for small utilities/MCP servers; 1g-2g for apps with databases/heavy runtimes; parquet-peek needed 2048m"
   - key: volumes
     input_type: string
     requirement: optional
@@ -70,7 +90,7 @@ parameters:
     input_type: string
     requirement: optional
     default: ""
-    description: "HTTP health path for the homepage siteMonitor, e.g. '/health'. Appended to http://127.0.0.1:<port>"
+    description: "HTTP health path for the homepage siteMonitor. For non-MCP services it is appended to http://127.0.0.1:<port>. For MCP services it is appended to the proxy URL."
   - key: widget
     input_type: string
     requirement: optional
@@ -78,6 +98,7 @@ parameters:
     description: "Optional homepage widget config (the lines under 'widget:', minus indentation), e.g. 'type: <type>' plus 'url: http://127.0.0.1:<port>' and 'key: <key>' where the widget needs one"
 prompt: |
   Add a new container to the NAS: **{{ container_name }}** (image `{{ image }}`).
+  {% if is_mcp == "true" %}This is an MCP/OpenAPI tool server — expose it behind the Traefik reverse proxy ({{ proxy_url }}/{{ container_name }}/{{ mcp_path }}).{% endif %}
   {% if is_own_container == "true" %}This is my own image — route it to watchtower-nick (scope=nick).{% else %}Third-party image — plain watchtower (nightly 03:00).{% endif %}
   {% if description %}What it does: {{ description }}{% endif %}
   {% if ports %}Ports: {{ ports }}{% endif %}
@@ -95,12 +116,15 @@ instructions: |
   ## Step 0 — Confirm details
   Before writing anything, confirm with the user (or use the provided parameters):
   - Container name, image, and what it does.
-  - Ports: published mapping `host:container`, loopback `127.0.0.1:host:container` for local-only tools, or `network_mode: host` when the tool must see the host network namespace (like nas-port-mcp).
+  - **Is it an MCP/OpenAPI tool server?** (is_mcp) If so, it must join the `ai_proxy` network and get the `traefik.*` labels so Open WebUI and other tools can reach it through the reverse proxy. Record mcp_port and mcp_path.
+  - Ports: published mapping `host:container`, loopback `127.0.0.1:host:container` for local-only tools, or `network_mode: host` when the tool must see the host network namespace (like nas-port-mcp). MCP servers behind the proxy generally do NOT need a host port.
   - Volumes and environment variables.
   - Image provenance: own image (ghcr.io/nickbrett1/*), third-party registry image, or a locally built image with no registry push (like vikunja-mcp).
 
   ## Step 1 — Create the compose file
-  Create `/volume1/docker/{{ container_name }}/compose.yaml` with this skeleton (match the existing files' formatting):
+  Create `/volume1/docker/{{ container_name }}/compose.yaml`. Two skeletons, depending on `is_mcp`:
+
+  **Non-MCP** (match the existing files' formatting):
 
   ```yaml
   services:
@@ -121,9 +145,43 @@ instructions: |
         - "com.centurylinklabs.watchtower.scope=nick"{% else %}- "com.centurylinklabs.watchtower.enable=true"{% endif %}
   ```
 
-  Note: the `restart: always` policy is intentional — it ensures the container comes back up automatically whenever the NAS reboots (Synology restarts the Docker daemon on boot, and `always` restarts the container unconditionally, unlike `unless-stopped` which respects a prior manual stop). Keep it as-is for every container.
+  **MCP tool server** (is_mcp=true) — same base, but join `ai_proxy` and add the Traefik labels:
 
-  Then fill in the `volumes:` and `environment:` lists from the parameters (each entry as a `- "KEY=value"` or `- "src:dst"` line at the same indentation as `- TZ=US/Eastern`). If `network_mode` is bridge and no ports were given, omit the `ports:` key entirely.
+  ```yaml
+  services:
+    {{ container_name }}:
+      image: {{ image }}
+      container_name: {{ container_name }}
+      restart: always
+      mem_limit: {{ mem_limit }}
+      memswap_limit: {{ mem_limit }}
+      {% if ports %}ports:
+        - "{{ ports }}"
+      {% endif %}environment:
+        - TZ=US/Eastern
+      volumes:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.{{ container_name }}.rule=PathPrefix(`/{{ container_name }}`)"
+        - "traefik.http.routers.{{ container_name }}.service={{ container_name }}"
+        - "traefik.http.routers.{{ container_name }}.middlewares={{ container_name }}-strip"
+        - "traefik.http.services.{{ container_name }}.loadbalancer.server.port={{ mcp_port }}"
+        - "traefik.http.middlewares.{{ container_name }}-strip.stripprefix.prefixes=/{{ container_name }}"
+        {% if is_own_container == "true" %}- "com.centurylinklabs.watchtower.enable=true"
+        - "com.centurylinklabs.watchtower.scope=nick"{% else %}- "com.centurylinklabs.watchtower.enable=true"{% endif %}
+      networks:
+        - ai_proxy
+
+  networks:
+    ai_proxy:
+      external: true
+  ```
+
+  Notes:
+  - `restart: always` is intentional — the container comes back up automatically whenever the NAS reboots (Synology restarts Docker on boot; `always` restarts unconditionally). Keep it as-is.
+  - The Traefik labels make the service reachable at **`{{ proxy_url }}/{{ container_name }}/{{ mcp_path }}`** (Traefik strips the `/<name>` prefix, so the backend still sees its canonical `{{ mcp_path }}`). Traefik auto-discovers it via the Docker provider — no Traefik restart needed.
+  - For MCP servers, `network_mode` defaults to bridge and the container is joined to the external `ai_proxy` network so both Traefik and Open WebUI can reach it by container name. A host `ports:` publish is optional (direct access only).
+  - Fill in the `volumes:` and `environment:` lists from the parameters (each entry as a `- "KEY=value"` or `- "src:dst"` line at the same indentation as `- TZ=US/Eastern`).
 
   Memory limits are **mandatory** — always set `mem_limit` and `memswap_limit` to the same value:
   - 512m baseline for small utilities/MCP servers.
@@ -137,7 +195,8 @@ instructions: |
   ## Step 2 — Deploy
   `cd /volume1/docker/{{ container_name }} && sudo docker compose up -d`
   Confirm it is running: `sudo docker ps --filter name={{ container_name }}`
-  If a health endpoint was given, check it: `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:<port>{{ health_endpoint }}`
+  If a health endpoint was given, check it. For MCP services verify the proxy route responds (Traefik hot-reloads the labels within seconds):
+  `curl -s -o /dev/null -w '%{http_code}' {{ proxy_url }}/{{ container_name }}{{ mcp_path }}`
 
   ## Step 3 — Verify memory (the parquet-peek lesson)
   Run `sudo docker stats --no-stream {{ container_name }}` and compare MemUsage to the limit. If the container is near/over the limit, has a rising RestartCount, or repeatedly exits with code 137 (OOM), raise `mem_limit` in the compose file and `sudo docker compose up -d` again. Check for crash-looping with `sudo docker inspect {{ container_name }}` (look at the RestartCount field).
@@ -149,13 +208,14 @@ instructions: |
   - Locally built → enable=false → neither updates it; note the manual rebuild command.
 
   ## Step 5 — Add to homepage (gethomepage)
-  Edit `/volume1/docker/homepage/config/services.yaml` and add the service under the **{{ homepage_group }}** group, matching the existing YAML style:
+  Edit `/volume1/docker/homepage/config/services.yaml` and add the service under the **{{ homepage_group }}** group, matching the existing YAML style. For MCP services use the proxy URL as the href:
 
   ```yaml
       - {{ container_name }}:
           icon: {{ icon }}
-          href: http://nas:<port>/
-          {% if description %}description: {{ description }}
+          {% if is_mcp == "true" %}href: {{ proxy_url }}/{{ container_name }}/{{ mcp_path }}
+          {% else %}href: http://nas:<port>/
+          {% endif %}{% if description %}description: {{ description }}
           {% endif %}server: local
           container: {{ container_name }}
           {% if health_endpoint %}siteMonitor: http://127.0.0.1:<port>{{ health_endpoint }}
@@ -170,5 +230,11 @@ instructions: |
   Indent each line to sit under the `widget:` key (two spaces deeper than the service keys).{% endif %}
   Homepage auto-reloads config on change; if the tile has not appeared within ~30 seconds, restart it: `sudo docker restart homepage`.
 
-  ## Step 6 — Finish and summarize
-  Report: compose file path, deploy status, memory limit + observed usage, watchtower routing (which instance + poll interval), and the homepage entry. Flag anything left for the user (widget API keys, DNS/Tailscale exposure for external access, first-run setup, etc.). Update the session todo list with any follow-ups.
+  ## Step 6 — Register the MCP URL (if is_mcp) and summarize
+  If this is an MCP/OpenAPI tool server, the externally-reachable URL is:
+  **`{{ proxy_url }}/{{ container_name }}/{{ mcp_path }}`**
+  - In **Open WebUI** → Workspace → Tools → Add tool server, set the URL to that value (for OpenAPI connections, the URL is the `{{ proxy_url }}/{{ container_name }}` base and the `{{ mcp_path }}` goes in the path field).
+  - The same URL can be pasted into any MCP client (Claude, goose, curl, etc.) from anywhere on the Tailnet or LAN.
+  - If an auth token/key is required, add it as the bearer token in the client config.
+
+  Report: compose file path, deploy status, memory limit + observed usage, watchtower routing (which instance + poll interval), the MCP URL (if applicable), and the homepage entry. Flag anything left for the user (widget API keys, auth tokens, first-run setup, etc.). Update the session todo list with any follow-ups.

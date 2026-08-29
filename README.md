@@ -26,9 +26,27 @@ Recipes 1–5 are the spec-first chain: run them in order. Each recipe validates
 
 | # | Recipe | Input → Output |
 |---|--------|----------------|
-| 6 | [`add-nas-container.yaml`](add-nas-container.yaml) | New container name/image/params → `/volume1/docker/<name>/compose.yaml` (sensible mem limits + correct watchtower labels), gethomepage entry, deployed & memory-verified |
+| 6 | [`add-nas-container.yaml`](add-nas-container.yaml) | New container name/image/params → `/volume1/docker/<name>/compose.yaml` (sensible mem limits + correct watchtower labels), gethomepage entry, deployed & memory-verified. With `is_mcp=true`, also joins the `ai_proxy` network and auto-registers behind the Traefik reverse proxy (`http://100.82.223.13:8092/<name>/<path>`). |
 
 NAS-specific (not part of the spec-first chain). Run from a goose session on the NAS; it models the nas-port-mcp / parquet-peek additions: composes the stack with `mem_limit`/`memswap_limit` caps, routes your own `ghcr.io/nickbrett1/*` images to watchtower-nick (`scope=nick`, 60s poll) via labels and third-party images to the plain nightly watchtower, then adds the tile to `/volume1/docker/homepage/config/services.yaml` and verifies memory/health post-deploy.
+
+### MCP tool servers & the reverse proxy
+
+MCP/OpenAPI tool servers (the ones Open WebUI and other agents call) should be exposed through the **Traefik reverse proxy** rather than each publishing their own host port. This gives every MCP server a stable, externally-reachable URL on a single entry port, reachable from Open WebUI, a browser, a phone, or any other tool.
+
+Architecture:
+
+```
+Open WebUI (ai_proxy) ─┐
+browser / other tools ─┼─► Traefik (ai_proxy, port 8092) ─► <mcp-service>:<port>/<mcp_path>
+phone / remote (Tailnet)┘        (PathPrefix + stripPrefix, label-driven)
+```
+
+- Traefik runs on the `ai_proxy` network (stack at `/volume1/docker/traefik`), HTTP entry point on host port **8092** (dashboard on `127.0.0.1:8091`). It uses the **Docker provider** (label-driven auto-discovery) plus a **file provider** for the pre-existing MCP routes.
+- Every MCP service is exposed as **`http://100.82.223.13:8092/<service>/<original-mcp-path>`** (e.g. `http://100.82.223.13:8092/phoenix/mcp`). The `100.82.223.13` address is the NAS's Tailscale IP, so the same URL works from Open WebUI's container, on-LAN browsers, and remote Tailnet devices. The `<service>` prefix is stripped by Traefik so the backend still sees its canonical path.
+- To register a new MCP server, run `/recipe add-nas-container` with `is_mcp=true` (and `mcp_port`, `mcp_path`). The recipe adds the `ai_proxy` network join and the `traefik.*` labels, so Traefik picks it up automatically — no proxy restart, no host port needed.
+
+The `ai_proxy` Docker network is the shared fabric: Open WebUI, Traefik, and all the MCP servers attach to it, and reach each other by container name.
 
 ## The contract (shared paths)
 
