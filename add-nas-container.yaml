@@ -1,6 +1,6 @@
 version: "1.0.0"
 title: "Add NAS Container"
-description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volume1/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, and verify memory/health. For MCP tool servers, also join the ai_proxy network and auto-register them behind the Traefik reverse proxy so they get an externally-reachable URL (e.g. http://100.82.223.13:8092/<name>/mcp)."
+description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volumeUSB1/usbshare/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, and verify memory/health. For MCP tool servers, also join the ai_proxy network and auto-register them behind the Traefik reverse proxy so they get an externally-reachable URL (e.g. http://100.82.223.13:8092/<name>/mcp)."
 parameters:
   - key: container_name
     input_type: string
@@ -71,7 +71,7 @@ parameters:
   - key: homepage_group
     input_type: select
     requirement: required
-    description: "Which group in /volume1/docker/homepage/config/services.yaml to add the service under"
+    description: "Which group in /volumeUSB1/usbshare/docker/homepage/config/services.yaml to add the service under"
     options:
       - "Servers & Devices"
       - "Media Stack"
@@ -111,7 +111,7 @@ prompt: |
   {% if health_endpoint %}Health endpoint: {{ health_endpoint }}{% endif %}
   {% if widget %}Widget: {{ widget }}{% endif %}
 instructions: |
-  You are adding a new container to the NAS. Follow the established conventions of the existing stacks (/volume1/docker/mealie, vikunja, nas-port-mcp, parquet-peek, ...) — read one or two of those compose files first so the new file matches the house style exactly.
+  You are adding a new container to the NAS. Follow the established conventions of the existing stacks (/volumeUSB1/usbshare/docker/mealie, vikunja, nas-port-mcp, parquet-peek, ...) — read one or two of those compose files first so the new file matches the house style exactly.
 
   ## Step 0 — Confirm details
   Before writing anything, confirm with the user (or use the provided parameters):
@@ -122,7 +122,7 @@ instructions: |
   - Image provenance: own image (ghcr.io/nickbrett1/*), third-party registry image, or a locally built image with no registry push (like vikunja-mcp).
 
   ## Step 1 — Create the compose file
-  Create `/volume1/docker/{{ container_name }}/compose.yaml`. Two skeletons, depending on `is_mcp`:
+  Create `/volumeUSB1/usbshare/docker/{{ container_name }}/compose.yaml`. Two skeletons, depending on `is_mcp`:
 
   **Non-MCP** (match the existing files' formatting):
 
@@ -190,10 +190,10 @@ instructions: |
   - Locally built image with no registry (so watchtower cannot update it): use `com.centurylinklabs.watchtower.enable=false` instead and note the manual rebuild command in a comment (see vikunja-mcp).
 
   Validate the file before deploying:
-  `sudo docker compose -f /volume1/docker/{{ container_name }}/compose.yaml config --quiet`
+  `sudo docker compose -f /volumeUSB1/usbshare/docker/{{ container_name }}/compose.yaml config --quiet`
 
   ## Step 2 — Deploy
-  `cd /volume1/docker/{{ container_name }} && sudo docker compose up -d`
+  `cd /volumeUSB1/usbshare/docker/{{ container_name }} && sudo docker compose up -d`
   Confirm it is running: `sudo docker ps --filter name={{ container_name }}`
   If a health endpoint was given, check it. For MCP services verify the proxy route responds (Traefik hot-reloads the labels within seconds):
   `curl -s -o /dev/null -w '%{http_code}' {{ proxy_url }}/{{ container_name }}{{ mcp_path }}`
@@ -208,7 +208,7 @@ instructions: |
   - Locally built → enable=false → neither updates it; note the manual rebuild command.
 
   ## Step 5 — Add to homepage (gethomepage)
-  Edit `/volume1/docker/homepage/config/services.yaml` and add the service under the **{{ homepage_group }}** group, matching the existing YAML style. For MCP services use the proxy URL as the href:
+  Edit `/volumeUSB1/usbshare/docker/homepage/config/services.yaml` and add the service under the **{{ homepage_group }}** group, matching the existing YAML style. For MCP services use the proxy URL as the href:
 
   ```yaml
       - {{ container_name }}:
@@ -222,7 +222,7 @@ instructions: |
           {% endif %}
   ```
 
-  Use `icon` from the parameters (an mdi-* name, an icon URL, or a png in /volume1/docker/homepage/config/icons/).
+  Use `icon` from the parameters (an mdi-* name, an icon URL, or a png in /volumeUSB1/usbshare/docker/homepage/config/icons/).
   {% if widget %}If a `widget` was provided, add it after `container:` with each line indented two spaces deeper than the service keys (see the plex/miniflux entries for the shape). The widget lines are:
 
   {{ widget }}

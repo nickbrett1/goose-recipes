@@ -26,9 +26,9 @@ Recipes 1–5 are the spec-first chain: run them in order. Each recipe validates
 
 | # | Recipe | Input → Output |
 |---|--------|----------------|
-| 6 | [`add-nas-container.yaml`](add-nas-container.yaml) | New container name/image/params → `/volume1/docker/<name>/compose.yaml` (sensible mem limits + correct watchtower labels), gethomepage entry, deployed & memory-verified. With `is_mcp=true`, also joins the `ai_proxy` network and auto-registers behind the Traefik reverse proxy (`http://100.82.223.13:8092/<name>/<path>`). |
+| 6 | [`add-nas-container.yaml`](add-nas-container.yaml) | New container name/image/params → `/volumeUSB1/usbshare/docker/<name>/compose.yaml` (sensible mem limits + correct watchtower labels), gethomepage entry, deployed & memory-verified. With `is_mcp=true`, also joins the `ai_proxy` network and auto-registers behind the Traefik reverse proxy (`http://100.82.223.13:8092/<name>/<path>`). |
 
-NAS-specific (not part of the spec-first chain). Run from a goose session on the NAS; it models the nas-port-mcp / parquet-peek additions: composes the stack with `mem_limit`/`memswap_limit` caps, routes your own `ghcr.io/nickbrett1/*` images to watchtower-nick (`scope=nick`, 60s poll) via labels and third-party images to the plain nightly watchtower, then adds the tile to `/volume1/docker/homepage/config/services.yaml` and verifies memory/health post-deploy.
+NAS-specific (not part of the spec-first chain). Run from a goose session on the NAS; it models the nas-port-mcp / parquet-peek additions: composes the stack with `mem_limit`/`memswap_limit` caps, routes your own `ghcr.io/nickbrett1/*` images to watchtower-nick (`scope=nick`, 60s poll) via labels and third-party images to the plain nightly watchtower, then adds the tile to `/volumeUSB1/usbshare/docker/homepage/config/services.yaml` and verifies memory/health post-deploy.
 
 ### MCP tool servers & the reverse proxy
 
@@ -42,7 +42,7 @@ browser / other tools ─┼─► Traefik (ai_proxy, port 8092) ─► <mcp-ser
 phone / remote (Tailnet)┘        (PathPrefix + stripPrefix, label-driven)
 ```
 
-- Traefik runs on the `ai_proxy` network (stack at `/volume1/docker/traefik`), HTTP entry point on host port **8092** (dashboard on `127.0.0.1:8091`). It uses the **Docker provider** (label-driven auto-discovery) plus a **file provider** for the pre-existing MCP routes.
+- Traefik runs on the `ai_proxy` network (stack at `/volumeUSB1/usbshare/docker/traefik`), HTTP entry point on host port **8092** (dashboard on `127.0.0.1:8091`). It uses the **Docker provider** (label-driven auto-discovery) plus a **file provider** for the pre-existing MCP routes.
 - Every MCP service is exposed as **`http://100.82.223.13:8092/<service>/<original-mcp-path>`** (e.g. `http://100.82.223.13:8092/phoenix/mcp`). The `100.82.223.13` address is the NAS's Tailscale IP, so the same URL works from Open WebUI's container, on-LAN browsers, and remote Tailnet devices. The `<service>` prefix is stripped by Traefik so the backend still sees its canonical path.
 - To register a new MCP server, run `/recipe add-nas-container` with `is_mcp=true` (and `mcp_port`, `mcp_path`). The recipe adds the `ai_proxy` network join and the `traefik.*` labels, so Traefik picks it up automatically — no proxy restart, no host port needed.
 
@@ -103,7 +103,7 @@ Run the recipes in order from a goose session in the workspace where you want th
 4. **Scaffold** — `/recipe scaffold-project` (provide `project_root`, `project_name`, optional `repository_url`/`capabilities`) — this recipe **pauses** for you to clone the generated repo
 5. **Execute** — launch a new goose session inside the cloned project (its devcontainer), then `/recipe execute-plan`
 
-For NAS container ops (Synology `/volume1/docker` stacks): `/recipe add-nas-container` (provide `container_name`, `image`, `homepage_group`; optionally `is_own_container`, `ports`, `mem_limit`, `volumes`, `environment`, `icon`, `health_endpoint`, `widget`).
+For NAS container ops (Synology `/volumeUSB1/usbshare/docker` stacks): `/recipe add-nas-container` (provide `container_name`, `image`, `homepage_group`; optionally `is_own_container`, `ports`, `mem_limit`, `volumes`, `environment`, `icon`, `health_endpoint`, `widget`).
 
 ## Prerequisites
 
