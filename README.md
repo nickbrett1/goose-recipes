@@ -73,25 +73,39 @@ When recipe 4 copies the design docs into the generated repo, they land in `<rep
 
 ## Installation
 
-Recipes are global. Two options:
-
-**Option A — GitHub repo (recommended).** Point goose at this repo directly:
-
-```bash
-export GOOSE_RECIPE_GITHUB_REPO="nickbrett1/goose-recipes"
-```
-
-Requires the GitHub CLI (`gh`) installed and authenticated.
-
-**Option B — clone into the global recipes directory.**
+Recipes are global. Clone this repo into goose's global recipes directory:
 
 ```bash
 git clone https://github.com/nickbrett1/goose-recipes.git ~/.config/goose/recipes/
 ```
 
-(Alternatively add the repo path via `GOOSE_RECIPE_PATH`.)
+(Alternatively add the repo path via `GOOSE_RECIPE_PATH`.) Verify discovery with `goose recipe list` — every entry should report `local: <path>`.
 
-Verify discovery with `goose recipe list`.
+### Keeping the clone up to date
+
+**A clone does not update itself, and goose does not tell you it is stale.** `goose recipe list` reads whatever is on disk, so pushing a recipe here does nothing for a machine holding an old clone — it keeps running the previous version, silently. This has already bitten once: the NAS's clone sat five weeks behind while commits landed, and sessions there ran an old `add-nas-container`.
+
+On the ryzen host this is automated by the `goose-recipes-fastforward` dagu job (every 30 min, alerts to ntfy on failure): it ssh's to the NAS with a dedicated forced-command key and fast-forwards `/volume1/homes/nick/.config/goose/recipes`. Anywhere else, schedule the same thing:
+
+```bash
+*/30 * * * * git -C ~/.config/goose/recipes pull --ff-only
+```
+
+or check by hand with `git -C ~/.config/goose/recipes log --oneline -1`.
+
+### The GitHub-backed source — newer builds only
+
+```bash
+export GOOSE_RECIPE_GITHUB_REPO="nickbrett1/goose-recipes"
+```
+
+This live-from-GitHub mode needs a goose build that actually implements it (plus `gh` authenticated). **Verify before relying on it** — the build deployed here (v1.55.0) has no `GOOSE_RECIPE_*` support at all and silently ignores the variable:
+
+```bash
+strings "$(readlink -f "$(command -v goose)")" | grep -c GOOSE_RECIPE   # 0 = inert
+```
+
+`0` means filesystem discovery is your only source of truth, so use the clone + scheduled pull above. An inert variable is how a five-week-stale clone went unnoticed, so prefer the clone unless that check returns non-zero.
 
 ## Usage
 
