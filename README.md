@@ -28,7 +28,7 @@ Recipes 1–5 are the spec-first chain: run them in order. Each recipe validates
 |---|--------|----------------|
 | 6 | [`add-nas-container.yaml`](add-nas-container.yaml) | New container name/image/params → `/volumeUSB1/usbshare/docker/<name>/compose.yaml` (sensible mem limits + correct watchtower labels), gethomepage entry, deployed & memory-verified. With `is_mcp=true`, also joins the `ai_proxy` network and auto-registers behind the Traefik reverse proxy (`http://100.82.223.13:8092/<name>/<path>`). |
 
-NAS-specific (not part of the spec-first chain). Run from a goose session on the NAS; it models the nas-port-mcp / parquet-peek additions: composes the stack with `mem_limit`/`memswap_limit` caps, routes your own `ghcr.io/nickbrett1/*` images to watchtower-nick (`scope=nick`, 60s poll) via labels and third-party images to the plain nightly watchtower, then adds the tile to `/volumeUSB1/usbshare/docker/homepage/config/services.yaml` and verifies memory/health post-deploy.
+NAS-specific (not part of the spec-first chain). Run from a goose session on the NAS; it models the nas-port-mcp / parquet-peek additions: composes the stack with `mem_limit`/`memswap_limit` caps, routes your own `ghcr.io/nickbrett1/*` images to watchtower-nick (`scope=nick`, 60s poll) via labels and third-party images to the plain nightly watchtower, then adds the tile to `/volumeUSB1/usbshare/docker/homepage/config/services.yaml` and verifies memory/health post-deploy. It ends by scanning the new container's logs and triaging every error/warn line as a real fault, a monitor-probe artifact (e.g. a `405 HEAD` from the homepage monitor's HEAD-first probe), or benign first-boot noise.
 
 ### MCP tool servers & the reverse proxy
 

@@ -1,6 +1,6 @@
 version: "1.0.0"
 title: "Add NAS Container"
-description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volumeUSB1/usbshare/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, and verify memory/health. For MCP tool servers, also join the ai_proxy network and auto-register them behind the Traefik reverse proxy so they get an externally-reachable URL (e.g. http://100.82.223.13:8092/<name>/mcp)."
+description: "Add a new container to the NAS the same way nas-port-mcp and parquet-peek were added: create /volumeUSB1/usbshare/docker/<name>/compose.yaml with a sensible memory cap and the correct watchtower labels (watchtower-nick scope=nick for your own GHCR images, plain watchtower for third-party), add the service to the gethomepage dashboard, deploy, verify memory/health, and finally scan the container logs for errors and triage them (real fault vs monitor-probe artifact vs benign first-boot noise). For MCP tool servers, also join the ai_proxy network and auto-register them behind the Traefik reverse proxy so they get an externally-reachable URL (e.g. http://100.82.223.13:8092/<name>/mcp)."
 parameters:
   - key: container_name
     input_type: string
@@ -223,6 +223,15 @@ instructions: |
   ```
 
   Use `icon` from the parameters (an mdi-* name, an icon URL, or a png in /volumeUSB1/usbshare/docker/homepage/config/icons/).
+
+  **Verify the monitor URL — do not assume it.** Homepage probes `siteMonitor` with **HEAD first**, and only retries with GET when the status is `> 403`. So an endpoint that answers `405` to HEAD (Tornado and route-only handlers routinely do) is stored verbatim as the tile's status: the tile reads *down* while the app is perfectly healthy, and the app logs a warning on every single poll. Probe both methods before committing the URL:
+
+  ```
+  curl -s -o /dev/null -w 'HEAD=%{http_code}\n' -I http://127.0.0.1:<port>{{ health_endpoint }}
+  curl -s -o /dev/null -w 'GET=%{http_code}\n'    http://127.0.0.1:<port>{{ health_endpoint }}
+  ```
+
+  Both must be 2xx/3xx. If HEAD comes back `405`, either point `siteMonitor` at an unauthenticated static asset that does answer HEAD (e.g. `/static/favicon.ico`), or omit `siteMonitor` entirely and let the `container:` ref be the monitor. Never ship a `siteMonitor` you have not probed with HEAD.
   {% if widget %}If a `widget` was provided, add it after `container:` with each line indented two spaces deeper than the service keys (see the plex/miniflux entries for the shape). The widget lines are:
 
   {{ widget }}
@@ -230,11 +239,28 @@ instructions: |
   Indent each line to sit under the `widget:` key (two spaces deeper than the service keys).{% endif %}
   Homepage auto-reloads config on change; if the tile has not appeared within ~30 seconds, restart it: `sudo docker restart homepage`.
 
-  ## Step 6 — Register the MCP URL (if is_mcp) and summarize
+  ## Step 6 — Read the logs (the tile can lie; the log cannot)
+  Give the container ~60 s to finish first boot, then actually read what it wrote. A container that says `Up` and answers its health endpoint can still be logging an error on every single poll.
+
+  ```
+  sudo docker logs --since 15m {{ container_name }} 2>&1 | tail -n 150
+  sudo docker logs --since 15m {{ container_name }} 2>&1 | grep -Ein 'error|warn|exception|traceback|fatal|panic|denied|refused|timeout|not found|no such file|cannot|fail' | head -40
+  sudo docker logs --since 15m {{ container_name }} 2>&1 | grep -E '(HEAD|GET|POST|PUT|PATCH|DELETE) /' | grep -Ev ' (200|201|204|206|301|302|304)\b' | head -40
+  ```
+
+  The first is the raw tail; the second catches levelled errors and warnings; the third isolates **non-2xx request lines** (a bare `4[0-9][0-9]` pattern would match ports, byte counts and timings too, so match on the method instead). `docker logs` writes the app's stderr to *stderr*, so the `2>&1` is required or grep sees nothing. Triage every hit into one of three buckets, and record the bucket in the final report so a later session does not re-open a line that was already judged:
+
+  - **Real fault — fix it before reporting success.** `address already in use` (port clash), volume or permission errors (`EACCES`, `Permission denied` — usually a uid mismatch: compare `docker exec {{ container_name }} id` against `ls -ln` on the host path), a missing required env var, upstream auth failures, failed DB migrations, OOM (`exited 137`, see Step 3). None of these may be left open in the summary.
+  - **Probe artifact — fix the caller, not the container.** Requests that come from a monitor or your own `curl` rather than from real use. The tell is a request line naming a method the app does not implement, e.g. `405 HEAD /api`. Resolve the caller from the logged IP: a bridge gateway (`172.18.0.1`, `172.17.0.1`) is **host-originated** — a host-networked monitor such as homepage, or your own shell — while `172.x.0.y` is another container. A 405/404 from a monitor is not a container fault, but it does mean the **dashboard is recording that status as the service state** (homepage stores the HEAD result verbatim), so the tile can read *down* while the app is fine. Fix it by correcting the `siteMonitor` URL per Step 5, or by dropping `siteMonitor` and relying on the `container:` ref.
+  - **Benign first-boot noise.** Optional config absent, deprecation warnings, a "no such file" for a deliberately empty volume, telemetry/TLS chatter. Fine to keep — but say so explicitly in the report instead of staying silent.
+
+  Then confirm the container goes **quiet at steady state**: after it has settled (2–3 min), re-run the tail and check nothing new is accumulating. A line that repeats on a timer — every poll, every 60 s — is a real defect even when its level is only `W`.
+
+  ## Step 7 — Register the MCP URL (if is_mcp) and summarize
   If this is an MCP/OpenAPI tool server, the externally-reachable URL is:
   **`{{ proxy_url }}/{{ container_name }}/{{ mcp_path }}`**
   - In **Open WebUI** → Workspace → Tools → Add tool server, set the URL to that value (for OpenAPI connections, the URL is the `{{ proxy_url }}/{{ container_name }}` base and the `{{ mcp_path }}` goes in the path field).
   - The same URL can be pasted into any MCP client (Claude, goose, curl, etc.) from anywhere on the Tailnet or LAN.
   - If an auth token/key is required, add it as the bearer token in the client config.
 
-  Report: compose file path, deploy status, memory limit + observed usage, watchtower routing (which instance + poll interval), the MCP URL (if applicable), and the homepage entry. Flag anything left for the user (widget API keys, auth tokens, first-run setup, etc.). Update the session todo list with any follow-ups.
+  Report: compose file path, deploy status, memory limit + observed usage, watchtower routing (which instance + poll interval), the MCP URL (if applicable), the homepage entry, and the **log-scan result** from Step 6 — what was found, which bucket each line fell into, and whether the container is quiet at steady state. Flag anything left for the user (widget API keys, auth tokens, first-run setup, etc.). Update the session todo list with any follow-ups.
